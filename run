@@ -1,2 +1,2 @@
 #!/bin/bash
-python ./sungrow-dbus.py
+python /data/sungrow-dbus//sungrow-dbus.py

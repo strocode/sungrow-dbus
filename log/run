@@ -1,3 +1,4 @@
 #!/bin/sh
 exec 2>&1
-exec multilog t s99999 n8 /var/log/dbus-twc3
+mkdir -p /var/log/sungrow-dbus/
+exec multilog t s99999 n8 /var/log/sungrow-dbus
