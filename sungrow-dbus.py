@@ -23,6 +23,7 @@ sys.path.insert(1, '/opt/victronenergy')
 sys.path.insert(1, '/opt/victronenergy/dbus-mqtt/ext/velib_python/')
 from vedbus import VeDbusService
 from pymodbus.client.sync import ModbusTcpClient
+log = logging.getLogger(__name__)
 
 def twos_comp(val, bits=16):
     """compute the 2's complement of int value val"""
@@ -58,7 +59,6 @@ class SungrowProduct:
 
         logging.debug("%s /DeviceInstance = %d" % (servicename, deviceinstance))
         connection=str(self._client)
-        productid=self.read(5000)
 
         # Create the management objects, as specified in the ccgx dbus-api document
         self._dbusservice.add_path('/Mgmt/ProcessName', __file__)
@@ -67,11 +67,23 @@ class SungrowProduct:
 
         # Create the mandatory objects
         self._dbusservice.add_path('/DeviceInstance', deviceinstance)
-        self._dbusservice.add_path('/ProductId', productid)
         self._dbusservice.add_path('/ProductName', productname)
         self._dbusservice.add_path('/FirmwareVersion', 0)
         self._dbusservice.add_path('/HardwareVersion', 0)
-        self._dbusservice.add_path('/Connected', 1)
+        productid = 0
+        connected = 0
+        try:
+            productid=self.read(5000)
+            connected = 1
+        except:
+            log.info('not connected')
+            productid = 0
+            connected = 0
+            
+        self._dbusservice.add_path('/ProductId', productid)
+        self._dbusservice.add_path('/Connected', connected)
+        GLib.timeout_add(self._interval_ms, self._update_robust)
+
 
     def __iadd__(self, d):
         path = d[0]
@@ -81,6 +93,19 @@ class SungrowProduct:
 
     def read(self, addr, n=1):
         return read(self._client, addr, n)
+
+    def _update_robust(self):
+        log.debug('Update robust')
+        with self._dbusservice as s:
+            try:
+                self._update(s)
+                s['/Connected'] = 1
+            except:
+                log.exception('Exception doing update')
+                s['/Connected'] = 0
+
+        GLib.timeout_add(self._interval_ms, self._update_robust)
+
 
 
 
@@ -113,26 +138,22 @@ class SungrowInverter(SungrowProduct):
 
         self.phase_energies = [0,0,0]            
 
-        GLib.timeout_add(self._interval_ms, self._update)
-
-
-    def _update(self):
+    def _update(self, s):
         interval_sec = self._interval_ms/1000.0
-        with self._dbusservice as s:
-            s['/Ac/Power'] = self.read(5009)
-            s['/Ac/Energy/Forward'] = self.read(5004)
-            d = self.read(5019, 6)
-            for phase in range(3):
-                p = phase + 1
-                v = d[phase]*0.1 # Volts
-                i = d[phase + 3]*0.1 # Amps
-                phase_power =  v * i*0.001 # KW
-                self.phase_energies[phase] += phase_power * interval_sec/3600.0 # kWh
+        s['/Ac/Power'] = self.read(5009)
+        s['/Ac/Energy/Forward'] = self.read(5004)
+        d = self.read(5019, 6)
+        for phase in range(3):
+            p = phase + 1
+            v = d[phase]*0.1 # Volts
+            i = d[phase + 3]*0.1 # Amps
+            phase_power =  v * i*0.001 # KW
+            self.phase_energies[phase] += phase_power * interval_sec/3600.0 # kWh
 
-                s[f'/Ac/L{p}/Voltage'] = round(v, 1)
-                s[f'/Ac/L{p}/Current'] = round(i, 1)
-                s[f'/Ac/L{p}/Power'] = round(phase_power, 1)
-                s[f'/Ac/L{p}/Energy/Forward'] =  round(self.phase_energies[phase],1)
+            s[f'/Ac/L{p}/Voltage'] = round(v, 1)
+            s[f'/Ac/L{p}/Current'] = round(i, 1)
+            s[f'/Ac/L{p}/Power'] = round(phase_power, 1)
+            s[f'/Ac/L{p}/Energy/Forward'] =  round(self.phase_energies[phase],1)
 
 
 
@@ -164,31 +185,31 @@ class SungrowMeter(SungrowProduct):
 
         self.phase_energies = [0,0,0]            
 
-        GLib.timeout_add(self._interval_ms, self._update)
 
-
-    def _update(self):
+    def _update(self, s):
         interval_sec = self._interval_ms/1000.0
-        with self._dbusservice as s:
-            d = self.read(5083, n=5104-5083)
-            # Every second one is rubbish
-            d = d[::2]
-            s['/Ac/Power'] = round(d[0],1) # W
-            s['/Ac/Energy/Forward'] = round(d[8]*0.1,1) # Total import energy - kWh
-            s['/Ac/Energy/Reverse'] = round(d[6]*0.1,1) # total export energy - kWh
+        
+        d = self.read(5083, n=5104-5083)
+        # Every second one is rubbish
+        d = d[::2]
+        s['/Ac/Power'] = round(d[0],1) # W
+        log.debug('/Ac/Power %s', s['/Ac/Power'])
 
-            dvolts = self.read(5019, 6)
-            pd = d[1:] # phase data
-            for phase in range(3):
-                p = phase + 1
-                v = 0 # not supplied
-                i = 0 # not supplied
-                phase_power = pd[phase]/1e3
+        s['/Ac/Energy/Forward'] = round(d[8]*0.1,1) # Total import energy - kWh
+        s['/Ac/Energy/Reverse'] = round(d[6]*0.1,1) # total export energy - kWh
 
-                s[f'/Ac/L{p}/Voltage'] = round(v, 1)
-                s[f'/Ac/L{p}/Current'] = round(i, 1)
-                s[f'/Ac/L{p}/Power'] = round(phase_power, 1)
-                s[f'/Ac/L{p}/Energy/Forward'] =  round(self.phase_energies[phase],1)
+        dvolts = self.read(5019, 6)
+        pd = d[1:] # phase data
+        for phase in range(3):
+            p = phase + 1
+            v = 0 # not supplied
+            i = 0 # not supplied
+            phase_power = pd[phase]/1e3
+
+            s[f'/Ac/L{p}/Voltage'] = round(v, 1)
+            s[f'/Ac/L{p}/Current'] = round(i, 1)
+            s[f'/Ac/L{p}/Power'] = round(phase_power, 1)
+            s[f'/Ac/L{p}/Energy/Forward'] =  round(self.phase_energies[phase],1)
 
 
 
