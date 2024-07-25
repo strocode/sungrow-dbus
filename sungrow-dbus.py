@@ -39,6 +39,14 @@ def read(client, addr, n=1):
         reg = reg[0]
     return reg
 
+
+def roundu(v, n, unit):
+    '''
+    Convert value to string with n significant digits and add unit string to the end
+    '''
+    v = round(v,n) #+ unit
+    return v
+
 # Need to make independent system busses otherwise you can't have multiple devices per process
 # https://community.victronenergy.com/questions/46675/venus-os-driver-for-fronius-smart-meter.html
 class SystemBus(dbus.bus.BusConnection):
@@ -116,7 +124,7 @@ class SungrowInverter(SungrowProduct):
         # Fixed values
         maxpower = 10 # self.read(XXX)
         self._dbusservice.add_path('/Ac/MaxPower', maxpower)
-        position = 1 # where it's connected to the inverter. 0=AC input 1; 1=AC output; 2=AC input 2
+        position = 0 # where it's connected to the inverter. 0=AC input 1; 1=AC output; 2=AC input 2
         self._dbusservice.add_path('/Position', position)
 
         self += '/Ac/Energy/Forward', 'kWh', 5004 #Total produced energy over all phases = Total power yields
@@ -140,20 +148,20 @@ class SungrowInverter(SungrowProduct):
 
     def _update(self, s):
         interval_sec = self._interval_ms/1000.0
-        s['/Ac/Power'] = self.read(5009)
-        s['/Ac/Energy/Forward'] = self.read(5004)
+        s['/Ac/Power'] = roundu(self.read(5009),1,'W')
+        s['/Ac/Energy/Forward'] = roundu(self.read(5004),1,'kWHr')
         d = self.read(5019, 6)
         for phase in range(3):
             p = phase + 1
             v = d[phase]*0.1 # Volts
             i = d[phase + 3]*0.1 # Amps
-            phase_power =  v * i*0.001 # KW
-            self.phase_energies[phase] += phase_power * interval_sec/3600.0 # kWh
+            phase_power =  v * i # W
+            self.phase_energies[phase] += phase_power * interval_sec/3600.0/1000 # kWh
 
-            s[f'/Ac/L{p}/Voltage'] = round(v, 1)
-            s[f'/Ac/L{p}/Current'] = round(i, 1)
-            s[f'/Ac/L{p}/Power'] = round(phase_power, 1)
-            s[f'/Ac/L{p}/Energy/Forward'] =  round(self.phase_energies[phase],1)
+            s[f'/Ac/L{p}/Voltage'] = roundu(v, 1,'V')
+            s[f'/Ac/L{p}/Current'] = roundu(i, 1,'A')
+            s[f'/Ac/L{p}/Power'] = roundu(phase_power, 1,'W')
+            s[f'/Ac/L{p}/Energy/Forward'] =  roundu(self.phase_energies[phase],1,'kWHr')
 
 
 
@@ -192,11 +200,11 @@ class SungrowMeter(SungrowProduct):
         d = self.read(5083, n=5104-5083)
         # Every second one is rubbish
         d = d[::2]
-        s['/Ac/Power'] = round(d[0],1) # W
+        s['/Ac/Power'] = roundu(d[0],1,'W') # W
         log.debug('/Ac/Power %s', s['/Ac/Power'])
 
-        s['/Ac/Energy/Forward'] = round(d[8]*0.1,1) # Total import energy - kWh
-        s['/Ac/Energy/Reverse'] = round(d[6]*0.1,1) # total export energy - kWh
+        s['/Ac/Energy/Forward'] = roundu(d[8]*0.1,1,'kwHr') # Total import energy - kWh
+        s['/Ac/Energy/Reverse'] = roundu(d[6]*0.1,1,'kwHr') # total export energy - kWh
 
         dvolts = self.read(5019, 6)
         pd = d[1:] # phase data
@@ -204,12 +212,13 @@ class SungrowMeter(SungrowProduct):
             p = phase + 1
             v = 0 # not supplied
             i = 0 # not supplied
-            phase_power = pd[phase]/1e3
+            phase_power = pd[phase] # W
+            self.phase_energies[phase] += phase_power * interval_sec/3600.0/1000# kWh
 
-            s[f'/Ac/L{p}/Voltage'] = round(v, 1)
-            s[f'/Ac/L{p}/Current'] = round(i, 1)
-            s[f'/Ac/L{p}/Power'] = round(phase_power, 1)
-            s[f'/Ac/L{p}/Energy/Forward'] =  round(self.phase_energies[phase],1)
+            s[f'/Ac/L{p}/Voltage'] = roundu(v, 1,'V')
+            s[f'/Ac/L{p}/Current'] = roundu(i, 1,'A')
+            s[f'/Ac/L{p}/Power'] = roundu(phase_power, 1,'W')
+            s[f'/Ac/L{p}/Energy/Forward'] =  roundu(self.phase_energies[phase],1,'kwHr')
 
 
 
@@ -235,7 +244,7 @@ class SungrowMeter(SungrowProduct):
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
 
     from dbus.mainloop.glib import DBusGMainLoop
     # Have a mainloop, so we can send/receive asynchronous calls to and from dbus
