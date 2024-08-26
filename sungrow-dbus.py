@@ -148,7 +148,7 @@ class SungrowInverter(SungrowProduct):
 
     def _update(self, s):
         interval_sec = self._interval_ms/1000.0
-        s['/Ac/Power'] = roundu(self.read(5009),1,'W')
+        s['/Ac/Power'] = roundu(self.read(5031),1,'W')
         s['/Ac/Energy/Forward'] = roundu(self.read(5004),1,'kWHr')
         d = self.read(5019, 6)
         for phase in range(3):
