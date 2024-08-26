@@ -19,9 +19,10 @@ for i in range(n):
     print(f'addr {addr}={v:d} 0x{v:x}')
 
 # set max power output = units of 0.1%
-max_output = 10
-addr = 5039 # export limitation value - units of 0.1 %
-#addr = 5039 # power limitation adjustment
+addr = 5008 # export limitation value - units of 0.1 %
+addr = 5039 # power limitation adjustment - units of 0.1kwHw - sets active power basically
+max_output = 100
+
 reg = c.write_register(addr-1,max_output,unit=1)
 reg = c.read_holding_registers(addr-1, 1, unit=1)
 print(f'set max output to {reg.registers[0]}')
