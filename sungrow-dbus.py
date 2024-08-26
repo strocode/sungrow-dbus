@@ -148,6 +148,9 @@ class SungrowInverter(SungrowProduct):
 
     def _update(self, s):
         interval_sec = self._interval_ms/1000.0
+        # HEY KB - for some reason the power in venus doesn't marry up with - basically anything in the Winet GUI
+        # check this as it may be lying to us?!
+
         s['/Ac/Power'] = roundu(self.read(5031),1,'W')
         s['/Ac/Energy/Forward'] = roundu(self.read(5004),1,'kWHr')
         d = self.read(5019, 6)
